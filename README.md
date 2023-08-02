@@ -9,8 +9,9 @@ Create a mechanism where the owner of a contract will need to ping or notify a c
 If there is no activity during this time period, the recipient will be able to withdraw the funds. 
 The assumption here is that the owner is no longer able to do so.
 
-
-
+## Hackathon (`hackathon.sol`)
+Find the winning project of the hackathon. 
+The winning project will be determined by the average score of all of its ratings.
 
 
 # Sample Hardhat Project
