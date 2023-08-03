@@ -25,9 +25,7 @@ contract MultiSig {
 
     function isOwner(address _address) public view returns (bool) {
         for (uint256 i; i < owners.length; i++) {
-            if (owners[i] == _address) {
-                return true;
-            }
+            if (owners[i] == _address) return true;
         }
         return false;
     }
@@ -40,15 +38,23 @@ contract MultiSig {
     function getConfirmationsCount(uint transactionId) public view returns(uint) {
         uint count;
         for(uint i = 0; i < owners.length; i++) {
-            if(confirmations[transactionId][owners[i]]) {
-                count++;
-            }
+            if(confirmations[transactionId][owners[i]]) count++;
         }
         return count;
     }
 
+    function isConfirmed(uint256 transactionId) public view returns (bool) {
+        if (getConfirmationsCount(transactionId) == required) {
+            return true;
+        }
+        return false;
+    }
+
     function confirmTransaction(uint transactionId) public onlyOwner {
         confirmations[transactionId][msg.sender] = true;
+        if (isConfirmed(transactionId)) {
+            executeTransaction(transactionId);
+        }
     }
 
     function addTransaction(address destination, uint value) internal onlyOwner returns(uint) {
@@ -57,8 +63,20 @@ contract MultiSig {
         return transactionCount - 1;
     }
 
-    function submitTransaction(address dest, uint value) external {
+    function submitTransaction(address dest, uint value) external onlyOwner {
         uint id = addTransaction(dest, value);
         confirmTransaction(id);
+    }
+
+    function executeTransaction(uint256 transactionId) public onlyOwner {
+        require(isConfirmed(transactionId), "not enough confirmations");
+        (bool s, ) = transactions[transactionId].destination.call{
+                value: transactions[transactionId].value
+            }("");
+        require(s, "could not send ether");
+        transactions[transactionId].executed = true;
+    }
+
+    receive() external payable {
     }
 }

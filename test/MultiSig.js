@@ -3,7 +3,12 @@ const {loadFixture} = require("@nomicfoundation/hardhat-toolbox/network-helpers"
 const {expect, assert} = require("chai");
 const {readFileSync} = require("fs");
 
+
 describe('MultiSig', () => {
+
+    const oneEther = ethers.parseEther("1");
+    const halfEther = ethers.parseEther("0.5");
+
     async function createContract() {
         const MultiSig = await ethers.getContractFactory("MultiSig");
         const accounts = await ethers.getSigners();
@@ -21,15 +26,16 @@ describe('MultiSig', () => {
 
     async function deployValidWithOneTx() {
         const {contract, accounts} = await loadFixture(deployValid)
-        await contract.submitTransaction(accounts[3], 100);
+        await contract.submitTransaction(accounts[3], halfEther);
         return ({contract, accounts})
     }
 
     async function deployValidWithTwoTxs() {
         const {contract, accounts} = await loadFixture(deployValidWithOneTx)
-        await contract.submitTransaction(accounts[4], 100);
+        await contract.submitTransaction(accounts[4], halfEther);
         return ({contract, accounts})
     }
+
 
     describe('ABI', () => {
         const jsonLoc = "./artifacts/contracts/MultiSig.sol/MultiSig.json";
@@ -74,6 +80,7 @@ describe('MultiSig', () => {
         });
     });
 
+
     describe('for a multisig with no owners', () => {
         it('should revert', async () => {
             const {MultiSig} = await loadFixture(createContract)
@@ -81,6 +88,7 @@ describe('MultiSig', () => {
             await expect(MultiSig.deploy([], _required)).to.be.revertedWith("owners must be > 0");
         });
     });
+
 
     describe('for a multisig with no required confirmations', () => {
         it('should revert', async () => {
@@ -90,6 +98,7 @@ describe('MultiSig', () => {
         });
     });
 
+
     describe('for a multisig with more required confirmations than owners', () => {
         it('should revert', async () => {
             const {MultiSig, accounts} = await loadFixture(createContract)
@@ -97,6 +106,7 @@ describe('MultiSig', () => {
             await expect(MultiSig.deploy(accounts.slice(0, 3), _required)).to.be.revertedWith("confirmations must be <= number of owners");
         });
     });
+
 
     describe('AddTransactions', function () {
 
@@ -112,6 +122,7 @@ describe('MultiSig', () => {
         });
     });
 
+
     describe('confirmTransaction', function () {
 
         describe('after creating the first transaction', function () {
@@ -125,6 +136,7 @@ describe('MultiSig', () => {
         describe('after creating the second transaction', function () {
             it('should confirm the transaction twice', async function () {
                 const {contract, accounts} = await loadFixture(deployValidWithTwoTxs)
+                await accounts[1].sendTransaction({ to: contract.target, value: oneEther });
                 await contract.connect(accounts[1]).confirmTransaction(1);
                 let confirmed = await contract.getConfirmationsCount.staticCall(1);
                 assert.equal(confirmed, 2);
@@ -141,6 +153,7 @@ describe('MultiSig', () => {
         describe('from a valid owner address', () => {
             it('should not revert', async function () {
                 const {contract, accounts} = await loadFixture(deployValidWithOneTx)
+                await accounts[1].sendTransaction({ to: contract.target, value: oneEther });
                 const confirmedBefore = await contract.getConfirmationsCount(0);
                 assert.equal(confirmedBefore, 1);
 
@@ -150,6 +163,7 @@ describe('MultiSig', () => {
             });
         });
     })
+
 
     describe('Submit Transaction', function () {
         it('should add a transaction', async function () {
@@ -179,6 +193,105 @@ describe('MultiSig', () => {
             it('should revert', async function () {
                 const {contract, accounts} = await loadFixture(deployValidWithOneTx)
                 await expect(contract.connect(accounts[3]).submitTransaction(accounts[1], 100)).to.be.revertedWith("not an owner");
+            });
+        });
+    });
+
+
+    describe('Fallback Tests', function () {
+        it('should accept funds', async function () {
+            const {contract, accounts} = await loadFixture(deployValid);
+            await expect(
+                accounts[1].sendTransaction({ to: contract.target, value: oneEther })
+            ).to.changeEtherBalance(contract.target, oneEther);
+
+        });
+    });
+
+
+    describe('Confirmed Tests', function () {
+        it('should return true if the required threshold is met for a transaction', async function () {
+            const {contract, accounts} = await loadFixture(deployValid);
+            await accounts[1].sendTransaction({ to: contract.target, value: oneEther });
+            await contract.submitTransaction(accounts[1], 100);
+            await contract.connect(accounts[1]).confirmTransaction(0);
+            const confirmed = await contract.isConfirmed.staticCall(0);
+            assert.equal(confirmed, true);
+        });
+
+        it('should return false if the required threshold is not met for a transaction', async function () {
+            const {contract, accounts} = await loadFixture(deployValid);
+            await contract.submitTransaction(accounts[1], 100);
+            let confirmed = await contract.isConfirmed.staticCall(0);
+            assert.equal(confirmed, false);
+        });
+    });
+
+
+    describe('Execute Transaction Tests', function () {
+
+        it('should execute a transaction if confirmation threshold is met', async function () {
+            const {contract, accounts} = await loadFixture(deployValid);
+            await accounts[1].sendTransaction({ to: contract.target, value: oneEther });
+            await contract.submitTransaction(accounts[4], halfEther);
+            await contract.connect(accounts[1]).confirmTransaction(0);
+            await expect(
+                contract.connect(accounts[1]).executeTransaction(0)
+            ).to.changeEtherBalance(accounts[4], halfEther);
+            let txn = await contract.transactions.staticCall(0);
+            assert.equal(txn[2], true, "Expected `executed` bool to be true!");
+        });
+
+        it('should not execute a transaction if confirmation threshold is not met', async function () {
+            const {contract, accounts} = await loadFixture(deployValid);
+            await accounts[1].sendTransaction({ to: contract.target, value: oneEther });
+            await contract.submitTransaction(accounts[4], halfEther);
+            await expect(contract.connect(accounts[1]).executeTransaction(0)).to.be.revertedWith("not enough confirmations");
+        });
+
+        it('should only allow valid owners to execute', async function () {
+            const {contract, accounts} = await loadFixture(deployValid);
+            await accounts[1].sendTransaction({ to: contract.target, value: oneEther });
+            await contract.submitTransaction(accounts[4], halfEther);
+            await contract.connect(accounts[1]).confirmTransaction(0);
+            await expect(contract.connect(accounts[4]).executeTransaction(0)).to.be.revertedWith("not an owner");
+        });
+    });
+
+
+    describe("after depositing and submitting a transaction", () => {
+
+        it('should not execute transaction yet', async () => {
+            const {contract, account} = await loadFixture(deployValidWithOneTx);
+            const txn = await contract.transactions.staticCall(0);
+            assert(!txn.executed);
+        });
+
+        it('should not update the beneficiary balance', async () => {
+            const {contract, accounts} = await loadFixture(deployValid);
+            await accounts[1].sendTransaction({ to: contract.target, value: oneEther });
+            await expect(
+                contract.submitTransaction(accounts[3], halfEther)
+            ).to.not.changeEtherBalance(accounts[3], halfEther);
+        });
+
+        describe('after confirming', () => {
+
+            it('should try to execute transaction after confirming', async () => {
+                const {contract, accounts} = await loadFixture(deployValidWithOneTx);
+                await accounts[1].sendTransaction({ to: contract.target, value: oneEther });
+                await contract.connect(accounts[1]).confirmTransaction(0);
+                const txn = await contract.transactions.staticCall(0);
+                assert(txn.executed);
+            });
+
+            it('should update the beneficiary balance', async () => {
+                const {contract, accounts} = await loadFixture(deployValidWithOneTx);
+                await accounts[1].sendTransaction({ to: contract.target, value: oneEther });
+                await expect(
+                    contract.connect(accounts[1]).confirmTransaction(0)
+                ).to.changeEtherBalance(accounts[3], halfEther);
+
             });
         });
     });
