@@ -26,7 +26,7 @@ contract Party {
 
     // pay the bill and split any remaining balance to attendees
     function payBill(address venue, uint bill) public {
-        require(address(this).balance >= bill);
+        require(address(this).balance >= bill, "not enough funds");
 
         // pay the venue
         (bool s,) = venue.call{value: bill}("");

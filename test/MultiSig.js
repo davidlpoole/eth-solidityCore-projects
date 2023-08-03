@@ -230,6 +230,12 @@ describe('MultiSig', () => {
 
     describe('Execute Transaction Tests', function () {
 
+        it('should revert if not enough funds', async function () {
+            const {contract, accounts} = await loadFixture(deployValid);
+            await contract.submitTransaction(accounts[4], halfEther);
+            await expect(contract.connect(accounts[1]).confirmTransaction(0)).to.be.revertedWith("not enough funds");
+        });
+
         it('should execute a transaction if confirmation threshold is met', async function () {
             const {contract, accounts} = await loadFixture(deployValid);
             await accounts[1].sendTransaction({ to: contract.target, value: oneEther });
@@ -262,7 +268,7 @@ describe('MultiSig', () => {
     describe("after depositing and submitting a transaction", () => {
 
         it('should not execute transaction yet', async () => {
-            const {contract, account} = await loadFixture(deployValidWithOneTx);
+            const {contract} = await loadFixture(deployValidWithOneTx);
             const txn = await contract.transactions.staticCall(0);
             assert(!txn.executed);
         });

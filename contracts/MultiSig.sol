@@ -70,6 +70,7 @@ contract MultiSig {
 
     function executeTransaction(uint256 transactionId) public onlyOwner {
         require(isConfirmed(transactionId), "not enough confirmations");
+        require(address(this).balance >= transactions[transactionId].value, "not enough funds");
         (bool s, ) = transactions[transactionId].destination.call{
                 value: transactions[transactionId].value
             }("");

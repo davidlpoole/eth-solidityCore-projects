@@ -129,4 +129,13 @@ describe('Party', () => {
     });
 
 
+    describe('for a ten ether bill', async () => {
+        const bill = ethers.parseEther("10");
+
+        it('it should revert', async () => {
+            const {contract, venue} = await loadFixture(initialRSVP);
+            await expect(contract.payBill(venue.address, bill)).to.be.revertedWith("not enough funds");
+        });
+
+    });
 });
