@@ -1,4 +1,5 @@
 const {loadFixture} = require("@nomicfoundation/hardhat-toolbox/network-helpers");
+
 const {expect, assert} = require("chai");
 const {readFileSync} = require("fs");
 
@@ -18,6 +19,18 @@ describe('MultiSig', () => {
         return {contract, accounts, _required}
     }
 
+    async function deployValidWithOneTx() {
+        const {contract, accounts} = await loadFixture(deployValid)
+        await contract.submitTransaction(accounts[3], 100);
+        return ({contract, accounts})
+    }
+
+    async function deployValidWithTwoTxs() {
+        const {contract, accounts} = await loadFixture(deployValidWithOneTx)
+        await contract.submitTransaction(accounts[4], 100);
+        return ({contract, accounts})
+    }
+
     describe('ABI', () => {
         const jsonLoc = "./artifacts/contracts/MultiSig.sol/MultiSig.json";
         const {abi} = JSON.parse(readFileSync(jsonLoc).toString());
@@ -33,6 +46,13 @@ describe('MultiSig', () => {
             assert(transactions);
             assert.deepEqual(transactions.inputs.map(x => x.type), ['uint256']);
             assert.deepEqual(transactions.outputs.map(x => x.type), ['address', 'uint256', 'bool']);
+        });
+
+        it('should define a confirmations mapping', async function () {
+            const confirmations = abi.filter(x => x.name === 'confirmations')[0];
+            assert(confirmations);
+            assert.deepEqual(confirmations.inputs.map(x => x.type), ['uint256', 'address']);
+            assert.deepEqual(confirmations.outputs.map(x => x.type), ['bool']);
         });
     })
 
@@ -80,28 +100,88 @@ describe('MultiSig', () => {
 
     describe('AddTransactions', function () {
 
-        it('should create a new Transaction', async function () {
-            const {contract, accounts} = await loadFixture(deployValid)
-            await contract.addTransaction(accounts[1], 100);
+        it('should not call addTransaction externally', async function () {
+            const {contract, accounts} = await loadFixture(deployValid);
+
+            try {
+                await contract.addTransaction(accounts[1], 100);
+                expect.fail();
+            } catch (error) {
+                expect(error.message).to.include("no matching function");
+            }
+        });
+    });
+
+    describe('confirmTransaction', function () {
+
+        describe('after creating the first transaction', function () {
+            it('should confirm the transaction', async function () {
+                const {contract} = await loadFixture(deployValidWithOneTx)
+                let confirmed = await contract.getConfirmationsCount.staticCall(0);
+                assert.equal(confirmed, 1);
+            });
+        });
+
+        describe('after creating the second transaction', function () {
+            it('should confirm the transaction twice', async function () {
+                const {contract, accounts} = await loadFixture(deployValidWithTwoTxs)
+                await contract.connect(accounts[1]).confirmTransaction(1);
+                let confirmed = await contract.getConfirmationsCount.staticCall(1);
+                assert.equal(confirmed, 2);
+            });
+        });
+
+        describe('from an invalid address', () => {
+            it('should revert', async function () {
+                const {contract, accounts} = await loadFixture(deployValidWithOneTx)
+                await expect(contract.connect(accounts[3]).confirmTransaction(0)).to.be.revertedWith("not an owner");
+            });
+        });
+
+        describe('from a valid owner address', () => {
+            it('should not revert', async function () {
+                const {contract, accounts} = await loadFixture(deployValidWithOneTx)
+                const confirmedBefore = await contract.getConfirmationsCount(0);
+                assert.equal(confirmedBefore, 1);
+
+                await contract.connect(accounts[1]).confirmTransaction(0);
+                const confirmedAfter = await contract.getConfirmationsCount(0);
+                assert.equal(confirmedAfter, 2);
+            });
+        });
+    })
+
+    describe('Submit Transaction', function () {
+        it('should add a transaction', async function () {
+            const {contract, accounts} = await loadFixture(deployValid);
+            await contract.submitTransaction(accounts[1], 100);
             let tx = await contract.transactions.staticCall(0);
-            assert.equal(tx.length, 3);
             let address = tx[0];
             assert.notEqual(address, ethers.ZeroAddress);
         });
 
+        it('should confirm a transaction', async function () {
+            const {contract, accounts} = await loadFixture(deployValid);
+            await contract.submitTransaction(accounts[1], 100);
+
+            let confirmed = await contract.getConfirmationsCount.staticCall(0);
+            assert.equal(confirmed, 1);
+        });
+
         it('should keep count of the amount of transactions', async function () {
             const {contract, accounts} = await loadFixture(deployValid)
-            await contract.addTransaction(accounts[1], 100);
+            await contract.submitTransaction(accounts[1], 100);
             let txCount = await contract.transactionCount.staticCall();
             assert.equal(txCount, 1);
         });
 
-        it('should return a transaction id', async function () {
-            const {contract, accounts} = await loadFixture(deployValid)
-            await contract.addTransaction(accounts[1], 100);
-            let txId = await contract.addTransaction.staticCall(accounts[1], 100);
-            assert.equal(txId, 1);
+        describe('from an invalid address', () => {
+            it('should revert', async function () {
+                const {contract, accounts} = await loadFixture(deployValidWithOneTx)
+                await expect(contract.connect(accounts[3]).submitTransaction(accounts[1], 100)).to.be.revertedWith("not an owner");
+            });
         });
     });
+
 
 });
